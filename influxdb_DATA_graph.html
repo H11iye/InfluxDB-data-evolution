@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InfluxDB Data Evolution</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Plotly.js CDN for charting - Updated to a more recent version -->
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js" charset="utf-8"></script>
+    <style>
+        /* Custom styles for better presentation */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #aeb9c4; /* Light gray background */
+        }
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: #ffffff;
+            border-radius: 1rem; /* Rounded corners */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .graph-container {
+            min-height: 500px; /* Ensure graph has a minimum height */
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="p-4">
+    <div class="container">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">
+            InfluxDB Data Evolution: Current (A) and Producing Water
+        </h1>
+
+        <div id="graph" class="graph-container">
+            <!-- Plotly graph will be rendered here -->
+            <p class="text-center text-gray-500">Loading data and generating graph...</p>
+        </div>
+        <div id="error-message" class="text-center text-red-600 mt-4 hidden">
+            <!-- Error messages will be displayed here -->
+        </div>
+    </div>
+
+    <script>
+        // Function to fetch and parse CSV data
+        async function fetchAndParseCSV(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    // Check for common local file access errors
+                    if (response.status === 0 && window.location.protocol === 'file:') {
+                        throw new Error("Local file access denied. Please run a local web server (e.g., 'python -m http.server') and access via http://localhost.");
+                    }
+                    throw new Error(`HTTP error! Status: ${response.status} - ${response.statusText}`);
+                }
+                const text = await response.text();
+                
+                // Split text into lines and then each line by comma
+                const lines = text.trim().split('\n');
+                if (lines.length < 2) {
+                    throw new Error("CSV file is empty or has no data rows.");
+                }
+
+                const headers = lines[0].split(',');
+                const data = [];
+
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(',');
+                    if (values.length !== headers.length) {
+                        console.warn(`Skipping malformed row ${i + 1}: ${lines[i]}`);
+                        continue; // Skip rows that don't match header count
+                    }
+                    const row = {};
+                    headers.forEach((header, index) => {
+                        row[header.trim()] = values[index].trim();
+                    });
+                    data.push(row);
+                }
+                return data;
+
+            } catch (error) {
+                console.error("Error fetching or parsing CSV:", error);
+                document.getElementById('error-message').textContent = `Failed to load data: ${error.message}. Please ensure 'influxdb_data.csv' exists and is served via a web server.`;
+                document.getElementById('error-message').classList.remove('hidden');
+                document.getElementById('graph').innerHTML = ''; // Clear loading message
+                return null;
+            }
+        }
+
+        // Function to render the Plotly graph
+        async function renderGraph() {
+            const csvData = await fetchAndParseCSV('influxdb_data.csv'); // Fetch the CSV file
+            if (!csvData) {
+                return; // Stop if data fetching failed
+            }
+
+            // Extract data for Plotly
+            const time = [];
+            const currentA = [];
+            const producingWater = [];
+
+            csvData.forEach(row => {
+                // Check if required columns exist before pushing
+                if (row._time && row.current_A && row.producing_water) {
+                    // Parse _time string into a Date object for proper x-axis scaling
+                    time.push(new Date(row._time));
+                    // Convert values to numbers
+                    currentA.push(parseFloat(row.current_A));
+                    producingWater.push(parseFloat(row.producing_water));
+                } else {
+                    console.warn("Skipping row due to missing required columns (_time, current_A, or producing_water):", row);
+                }
+            });
+
+            if (time.length === 0) {
+                document.getElementById('error-message').textContent = "No valid data found for plotting after parsing. Check CSV content and column names.";
+                document.getElementById('error-message').classList.remove('hidden');
+                document.getElementById('graph').innerHTML = '';
+                return;
+            }
+
+            // Define traces for Plotly
+            const traceCurrentA = {
+                x: time,
+                y: currentA,
+                mode: 'lines',
+                name: 'Current (A)',
+                line: {
+                    color: '#4299e1', // Tailwind blue-500
+                    width: 2
+                }
+            };
+
+            const traceProducingWater = {
+                x: time,
+                y: producingWater,
+                mode: 'lines',
+                name: 'Producing Water',
+                yaxis: 'y2', // Assign to secondary y-axis
+                line: {
+                    color: '#68d391', // Tailwind green-400
+                    width: 2
+                }
+            };
+
+            const data = [traceCurrentA, traceProducingWater];
+
+            // Define layout for Plotly graph
+            const layout = {
+                title: {
+                    text: 'Evolution of Current and Producing Water Over Time',
+                    font: {
+                        size: 20,
+                        color: '#333'
+                    }
+                },
+                xaxis: {
+                    title: 'Time',
+                    type: 'date',
+                    tickformat: '%Y-%m-%d\n%H:%M:%S', // Format for date and time
+                    showgrid: true,
+                    gridcolor: '#e2e8f0',
+                    linecolor: '#cbd5e0',
+                    linewidth: 1,
+                    mirror: true
+                },
+                yaxis: {
+                    title: 'Current (A)',
+                    titlefont: { color: '#4299e1' },
+                    tickfont: { color: '#4299e1' },
+                    showgrid: true,
+                    gridcolor: '#e2e8f0',
+                    linecolor: '#cbd5e0',
+                    linewidth: 1,
+                    mirror: true
+                },
+                yaxis2: {
+                    title: 'Producing Water',
+                    titlefont: { color: '#68d391' },
+                    tickfont: { color: '#68d391' },
+                    overlaying: 'y',
+                    side: 'right',
+                    showgrid: false, // Don't show grid for secondary axis to avoid clutter
+                    linecolor: '#cbd5e0',
+                    linewidth: 1,
+                    mirror: true
+                },
+                hovermode: 'x unified', // Show all values at a given x-coordinate on hover
+                margin: {
+                    l: 60, r: 60, b: 60, t: 80 // Adjust margins for better spacing
+                },
+                plot_bgcolor: '#ffffff', // Plot background color
+                paper_bgcolor: '#ffffff', // Paper background color
+                legend: {
+                    x: 0.01, y: 0.99, // Position legend at top-left
+                    bgcolor: 'rgba(255, 255, 255, 0.8)',
+                    bordercolor: '#ccc',
+                    borderwidth: 1
+                },
+                responsive: true // Make graph responsive to window resizing
+            };
+
+            // Render the graph
+            Plotly.newPlot('graph', data, layout, {responsive: true});
+        }
+
+        // Render the graph when the window loads
+        window.onload = renderGraph;
+    </script>
+</body>
+</html>

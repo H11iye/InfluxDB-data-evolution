@@ -1,0 +1,18 @@
+# .gitignore file for InfluxDB Extractor
+
+# Python virtual environment
+venv/
+
+# Environment variables file
+.env
+
+# Compiled Python files
+__pycache__/
+*.pyc
+
+# InfluxDB extracted data (if you don't want to track it)
+influxdb_data.csv
+
+# Operating System generated files
+.DS_Store
+Thumbs.db
